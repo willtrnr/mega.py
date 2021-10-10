@@ -151,12 +151,15 @@ class Mega:
 
     @retry(retry=retry_if_exception_type(RuntimeError),
            wait=wait_exponential(multiplier=2, min=2, max=60))
-    def _api_request(self, data):
+    def _api_request(self, data, extra_params=None):
         params = {'id': self.sequence_num}
         self.sequence_num += 1
 
         if self.sid:
-            params.update({'sid': self.sid})
+            params["sid"] = self.sid
+
+        if extra_params:
+            params.update(extra_params)
 
         # ensure input data is a list
         if not isinstance(data, list):
@@ -354,6 +357,19 @@ class Mega:
         for file in files['f']:
             processed_file = self._process_file(file, shared_keys)
             # ensure each file has a name before returning
+            if processed_file['a']:
+                files_dict[file['h']] = processed_file
+        return files_dict
+
+    def get_shared_folder_files(self, folder_handle, folder_key):
+        files = self._api_request(
+            {'a': 'f', 'c': 1, 'ca': 1, 'r': 1},
+            extra_params={'n': folder_handle},
+        )
+        files_dict = {}
+        shared_key = base64_to_a32(folder_key)
+        for file in files['f']:
+            processed_file = self._process_file(file, {'EXP': {file['h']: shared_key}})
             if processed_file['a']:
                 files_dict[file['h']] = processed_file
         return files_dict
@@ -557,16 +573,21 @@ class Mega:
                 post_list.append({"a": "d", "n": file, "i": self.request_id})
             return self._api_request(post_list)
 
-    def download(self, file, dest_path=None, dest_filename=None):
+    def download(self, file, dest_path=None, dest_filename=None, folder_handle=None):
         """
         Download a file by it's file object
         """
+        try:
+            file = file[1]
+        except (IndexError, KeyError):
+            pass
         return self._download_file(file_handle=None,
                                    file_key=None,
-                                   file=file[1],
+                                   file=file,
                                    dest_path=dest_path,
                                    dest_filename=dest_filename,
-                                   is_public=False)
+                                   is_public=False,
+                                   folder_handle=folder_handle)
 
     def _export_file(self, node):
         node_data = self._node_data(node)
@@ -651,28 +672,34 @@ class Mega:
                        dest_path=None,
                        dest_filename=None,
                        is_public=False,
-                       file=None):
+                       file=None,
+                       folder_handle=None):
+        api_params = None
+        if folder_handle:
+            api_params = {'n': folder_handle}
+
         if file is None:
             if is_public:
                 file_key = base64_to_a32(file_key)
-                file_data = self._api_request({
-                    'a': 'g',
-                    'g': 1,
-                    'p': file_handle
-                })
+                file_data = self._api_request(
+                    {'a': 'g', 'g': 1, 'p': file_handle},
+                    extra_params=api_params
+                )
             else:
-                file_data = self._api_request({
-                    'a': 'g',
-                    'g': 1,
-                    'n': file_handle
-                })
+                file_data = self._api_request(
+                    {'a': 'g', 'g': 1, 'n': file_handle},
+                    extra_params=api_params
+                )
 
             k = (file_key[0] ^ file_key[4], file_key[1] ^ file_key[5],
                  file_key[2] ^ file_key[6], file_key[3] ^ file_key[7])
             iv = file_key[4:6] + (0, 0)
             meta_mac = file_key[6:8]
         else:
-            file_data = self._api_request({'a': 'g', 'g': 1, 'n': file['h']})
+            file_data = self._api_request(
+                {'a': 'g', 'g': 1, 'n': file['h']},
+                extra_params=api_params
+            )
             k = file['k']
             iv = file['iv']
             meta_mac = file['meta_mac']
