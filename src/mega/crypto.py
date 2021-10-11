@@ -1,36 +1,18 @@
 from Crypto.Cipher import AES
-import json
-import base64
+import orjson as json
+import pybase64 as base64
 import struct
 import binascii
 import random
-import sys
-
-# Python3 compatibility
-if sys.version_info < (3, ):
-
-    def makebyte(x):
-        return x
-
-    def makestring(x):
-        return x
-else:
-    import codecs
-
-    def makebyte(x):
-        return codecs.latin_1_encode(x)[0]
-
-    def makestring(x):
-        return codecs.latin_1_decode(x)[0]
 
 
 def aes_cbc_encrypt(data, key):
-    aes_cipher = AES.new(key, AES.MODE_CBC, makebyte('\0' * 16))
+    aes_cipher = AES.new(key, AES.MODE_CBC, b'\0' * 16)
     return aes_cipher.encrypt(data)
 
 
 def aes_cbc_decrypt(data, key):
-    aes_cipher = AES.new(key, AES.MODE_CBC, makebyte('\0' * 16))
+    aes_cipher = AES.new(key, AES.MODE_CBC, b'\0' * 16)
     return aes_cipher.decrypt(data)
 
 
@@ -75,17 +57,15 @@ def decrypt_key(a, key):
 
 
 def encrypt_attr(attr, key):
-    attr = makebyte('MEGA' + json.dumps(attr))
+    attr = b'MEGA' + json.dumps(attr)
     if len(attr) % 16:
         attr += b'\0' * (16 - len(attr) % 16)
     return aes_cbc_encrypt(attr, a32_to_str(key))
 
 
 def decrypt_attr(attr, key):
-    attr = aes_cbc_decrypt(attr, a32_to_str(key))
-    attr = makestring(attr)
-    attr = attr.rstrip('\0')
-    return json.loads(attr[4:]) if attr[:6] == 'MEGA{"' else False
+    attr = aes_cbc_decrypt(attr, a32_to_str(key)).rstrip(b'\0')
+    return json.loads(attr[4:]) if attr[:6] == b'MEGA{"' else False
 
 
 def a32_to_str(a):
@@ -94,7 +74,7 @@ def a32_to_str(a):
 
 def str_to_a32(b):
     if isinstance(b, str):
-        b = makebyte(b)
+        b = b.encode("utf-8")
     if len(b) % 4:
         # pad to multiple of 4
         b += b'\0' * (4 - len(b) % 4)
@@ -127,10 +107,14 @@ def modular_inverse(a, m):
 
 
 def base64_url_decode(data):
-    data += '=='[(2 - len(data) * 3) % 4:]
-    for search, replace in (('-', '+'), ('_', '/'), (',', '')):
-        data = data.replace(search, replace)
-    return base64.b64decode(data)
+    data = data.replace(',', '')
+    if len(data) % 4 != 0:
+        data += '==='[:4 - (len(data) % 4)]
+    return base64.b64decode(
+        data.replace(',', ''),
+        altchars=b'-_',
+        validate=True,
+    )
 
 
 def base64_to_a32(s):
@@ -138,11 +122,7 @@ def base64_to_a32(s):
 
 
 def base64_url_encode(data):
-    data = base64.b64encode(data)
-    data = makestring(data)
-    for search, replace in (('+', '-'), ('/', '_'), ('=', '')):
-        data = data.replace(search, replace)
-    return data
+    return base64.b64encode_as_string(data, altchars=b'-_').rstrip('=')
 
 
 def a32_to_base64(a):

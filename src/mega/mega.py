@@ -1,6 +1,6 @@
 import math
 import re
-import json
+import orjson as json
 import logging
 import secrets
 from pathlib import Path
@@ -22,7 +22,7 @@ from .crypto import (a32_to_base64, encrypt_key, base64_url_encode,
                      encrypt_attr, base64_to_a32, base64_url_decode,
                      decrypt_attr, a32_to_str, get_chunks, str_to_a32,
                      decrypt_key, mpi_to_int, stringhash, prepare_key, make_id,
-                     makebyte, modular_inverse)
+                     modular_inverse)
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ class Mega:
             data=json.dumps(data),
             timeout=self.timeout,
         )
-        json_resp = json.loads(response.text)
+        json_resp = json.loads(response.content)
         try:
             if isinstance(json_resp, list):
                 int_resp = json_resp[0] if isinstance(json_resp[0],
@@ -819,7 +819,7 @@ class Mega:
 
                     block = chunk[i:i + 16]
                     if len(block) % 16:
-                        block += makebyte('\0' * (16 - len(block) % 16))
+                        block += b'\0' * (16 - len(block) % 16)
                     mac_str = mac_encryptor.encrypt(encryptor.encrypt(block))
 
                     # encrypt file and upload
