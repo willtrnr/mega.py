@@ -573,7 +573,7 @@ class Mega:
                 post_list.append({"a": "d", "n": file, "i": self.request_id})
             return self._api_request(post_list)
 
-    def download(self, file, dest_path=None, dest_filename=None, folder_handle=None):
+    def download(self, file, dest_path=None, dest_filename=None, folder_handle=None, progress_hook=None):
         """
         Download a file by it's file object
         """
@@ -587,7 +587,8 @@ class Mega:
                                    dest_path=dest_path,
                                    dest_filename=dest_filename,
                                    is_public=False,
-                                   folder_handle=folder_handle)
+                                   folder_handle=folder_handle,
+                                   progress_hook=progress_hook)
 
     def _export_file(self, node):
         node_data = self._node_data(node)
@@ -651,7 +652,7 @@ class Mega:
         nodes = self.get_files()
         return self.get_folder_link(nodes[node_id])
 
-    def download_url(self, url, dest_path=None, dest_filename=None):
+    def download_url(self, url, dest_path=None, dest_filename=None, progress_hook=None):
         """
         Download a file by it's public url
         """
@@ -664,6 +665,7 @@ class Mega:
             dest_path=dest_path,
             dest_filename=dest_filename,
             is_public=True,
+            progress_hook=progress_hook,
         )
 
     def _download_file(self,
@@ -673,7 +675,8 @@ class Mega:
                        dest_filename=None,
                        is_public=False,
                        file=None,
-                       folder_handle=None):
+                       folder_handle=None,
+                       progress_hook=None):
         api_params = None
         if folder_handle:
             api_params = {'n': folder_handle}
@@ -739,7 +742,7 @@ class Mega:
                                     mac_str.encode("utf8"))
             iv_str = a32_to_str([iv[0], iv[1], iv[0], iv[1]])
 
-            for chunk_start, chunk_size in get_chunks(file_size):
+            for _, chunk_size in get_chunks(file_size):
                 chunk = input_file.read(chunk_size)
                 chunk = aes.decrypt(chunk)
                 temp_output_file.write(chunk)
@@ -760,9 +763,8 @@ class Mega:
                     block += b'\0' * (16 - (len(block) % 16))
                 mac_str = mac_encryptor.encrypt(encryptor.encrypt(block))
 
-                file_info = os.stat(temp_output_file.name)
-                logger.info('%s of %s downloaded', file_info.st_size,
-                            file_size)
+                if hook := progress_hook:
+                    hook(file_size, chunk_size)
             file_mac = str_to_a32(mac_str)
             # check mac integrity
             if (file_mac[0] ^ file_mac[1],
