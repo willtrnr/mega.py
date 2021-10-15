@@ -8,11 +8,10 @@ import hashlib
 from Crypto.Cipher import AES
 from Crypto.PublicKey import RSA
 from Crypto.Util import Counter
+from contextlib import closing
 import os
 import random
 import binascii
-import tempfile
-import shutil
 
 import requests
 from tenacity import retry, wait_exponential, retry_if_exception_type
@@ -722,30 +721,28 @@ class Mega:
         else:
             file_name = attribs['n']
 
-        input_file = requests.get(file_url, stream=True).raw
-
         if dest_path is None:
-            dest_path = ''
+            dest_path = Path()
         else:
-            dest_path += '/'
+            dest_path = Path(dest_path)
 
-        with tempfile.NamedTemporaryFile(mode='w+b',
-                                         prefix='megapy_',
-                                         delete=False) as temp_output_file:
+        output_path = Path(dest_path).joinpath(file_name)
+
+        resp = requests.get(file_url, stream=True)
+        with closing(resp), output_path.open("wb") as out:
             k_str = a32_to_str(k)
             counter = Counter.new(128,
                                   initial_value=((iv[0] << 32) + iv[1]) << 64)
             aes = AES.new(k_str, AES.MODE_CTR, counter=counter)
 
             mac_str = '\0' * 16
-            mac_encryptor = AES.new(k_str, AES.MODE_CBC,
-                                    mac_str.encode("utf8"))
+            mac_encryptor = AES.new(k_str, AES.MODE_CBC, mac_str.encode("utf8"))
             iv_str = a32_to_str([iv[0], iv[1], iv[0], iv[1]])
 
             for _, chunk_size in get_chunks(file_size):
-                chunk = input_file.read(chunk_size)
+                chunk = resp.raw.read(chunk_size)
                 chunk = aes.decrypt(chunk)
-                temp_output_file.write(chunk)
+                out.write(chunk)
 
                 encryptor = AES.new(k_str, AES.MODE_CBC, iv_str)
                 for i in range(0, len(chunk) - 16, 16):
@@ -765,14 +762,13 @@ class Mega:
 
                 if hook := progress_hook:
                     hook(file_size, chunk_size)
-            file_mac = str_to_a32(mac_str)
-            # check mac integrity
-            if (file_mac[0] ^ file_mac[1],
-                    file_mac[2] ^ file_mac[3]) != meta_mac:
-                raise ValueError('Mismatched mac')
-            output_path = Path(dest_path + file_name)
-            shutil.move(temp_output_file.name, output_path)
-            return output_path
+
+        file_mac = str_to_a32(mac_str)
+        # check mac integrity
+        if (file_mac[0] ^ file_mac[1], file_mac[2] ^ file_mac[3]) != meta_mac:
+            raise ValueError('Mismatched mac')
+
+        return output_path
 
     def upload(self, filename, dest=None, dest_filename=None):
         # determine storage node
